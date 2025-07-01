@@ -1,159 +1,99 @@
-# 📡 Encrypted DNS-Based Microblogging Platform
 
-A minimal, decentralized microblogging system that uses **DNS TXT records** to store encrypted posts, votes, and comments. The Android app interacts with a **serverless proxy** to write content to DNS (e.g., via Cloudflare's API), and reads directly from DNS to display public or encrypted content.
+# 🌐 DNSmo — Decentralized, Encrypted Microblogging over DNS
 
----
+DNSmo is a minimal, infrastructure-free microblogging system that stores encrypted posts, comments, votes, and profile data entirely in **DNS TXT records** under user-owned zones.
 
-## 🧠 Core Concepts
-
-### ✅ Data Storage via DNS
-
-- **Posts, votes, comments** are stored in **TXT records** under structured subdomains.
-- DNS is globally readable and resilient, with no traditional backend.
-- Writes go through a **minimal serverless endpoint** (e.g. Cloudflare Worker).
-
-### 🔐 End-to-End Encryption
-
-- All content is encrypted using **public-key cryptography** (NaCl sealed boxes).
-- Every post is **signed** with the author's private key (Ed25519).
-- Only recipients with the right decryption key can view content.
-
-### 📱 App-Centric UX
-
-- The Android app handles encryption, DNS lookups, and interactions.
-- Posts, votes, and comments are composed and pushed via API.
-- Profiles are browsed by walking post chains.
+Built for **true decentralization**, DNSmo enables fully portable user identities, cryptographic ownership of content, and a feed constructed entirely from public DNS queries — no centralized servers or social networks.
 
 ---
 
-## 🧩 Data Structure
+## 🧠 Core Philosophy
 
-### 📝 Posts
+- 📡 **Read = DNS only** — Content is read directly from the DNS using your system resolver or DoH.
+- ✍️ **Write = Serverless proxy** — Writing goes through a small API (e.g., Cloudflare Worker) that updates DNS records.
+- 🔐 **Encrypted to outsiders** — Only DNSmo-aware clients can decrypt and verify data.
+- 👤 **User-owned zones** — Every user owns their domain (e.g., `alice.dnsmo.zone`) and all content beneath it.
+- 📦 **Portable & forkable** — Users can export all their DNS content and spin up their own ecosystem.
 
-- Stored at: `0.postID.username.example.com`, `1.postID.username.example.com`, etc.
-- Metadata at: `meta.postID.username.example.com`
-- Each chunk holds up to 255 bytes of base64-encoded encrypted data.
+---
 
-**Example Records:**
+## 📦 Directory Layout (Hierarchical DNS Zone)
 
-```
-0.abc123.alice.example.com TXT "chunk0"
-1.abc123.alice.example.com TXT "chunk1"
-meta.abc123.alice.example.com TXT "timestamp|nextPostID|hash"
-```
-
-### 📇 Profile
+Example: `alice.dnsmo.zone`
 
 ```
-head.alice.example.com TXT "abc123"  # points to most recent post
-_profile.alice.example.com TXT "pubkey=...|displayName=..."
+alice.dnsmo.zone
+├── profile/
+│   └── _profile TXT "pubkey=...|displayName=Alice"
+├── posts/
+│   ├── 20250701-abc123/
+│   │   ├── 0 TXT "chunk0"
+│   │   ├── 1 TXT "chunk1"
+│   │   └── meta TXT "timestamp|sig|next"
+├── comments/
+│   ├── abc123-comment1/
+│   │   ├── 0 TXT "chunk0"
+│   │   └── meta TXT "timestamp|sig|next"
+├── votes/
+│   └── abc123-bob TXT "+1|bob_pubkey|sig"
+└── head TXT "20250701-abc123"  # most recent post
 ```
 
-### 👍 Votes
-
-Stored as signed TXT records:
-
-```
-vote0.abc123.alice.example.com TXT "bob_pubkey|+1|sig"
-vote1.abc123.alice.example.com TXT "carol_pubkey|-1|sig"
-```
-
-### 💬 Comments
-
-```
-comment0.abc123.alice.example.com TXT "chunk0"
-meta.comment0.abc123.alice.example.com TXT "timestamp|sig|next"
-```
+All data is chunked and signed. Chronology is established through timestamps and `next` pointers.
 
 ---
 
 ## 🔐 Security Model
 
-| Function   | Method                                    |
-| ---------- | ----------------------------------------- |
-| Encryption | NaCl Sealed Box (X25519 + XSalsa20)       |
-| Signing    | Ed25519                                   |
-| Encoding   | Base64 for DNS safety                     |
-| Auth       | DNS updates via scoped API token or proxy |
+| Function   | Method                                      |
+|------------|---------------------------------------------|
+| Encryption | NaCl Sealed Box (X25519 + XSalsa20)         |
+| Signing    | Ed25519                                     |
+| Auth       | DNS updates via API key (scoped to writes)  |
+| Visibility | Opaque outside DNSmo app, decrypted inside  |
 
-- Every post is encrypted and signed.
-- Readers verify integrity via public keys in the profile zone.
-- No plaintext visible to DNS resolver, ISP, or snooper.
+- Posts, comments, votes: Encrypted and signed.
+- Readers verify signatures against `_profile` public key.
+- Posts are only visible to DNSmo-aware apps.
 
 ---
 
-## 📲 App Responsibilities
+## 📇 DNS Record Types
 
-### Reading:
+### 📝 Posts
 
-1. Query `head.username.example.com` → get postID.
-2. Fetch `0.postID.*`, `1.postID.*`, `meta.*`.
-3. Follow `nextPostID` to walk the feed.
-4. Fetch and verify `vote*`, `comment*` subdomains.
-5. Decrypt and render valid content.
-
-### Writing:
-
-1. App encrypts and signs content.
-2. Splits into 255-byte chunks.
-3. Sends JSON to serverless endpoint:
-
-```json
-{
-  "user": "alice",
-  "postID": "abc123",
-  "chunks": ["chunk0", "chunk1"],
-  "meta": { "timestamp": 1727382881, "next": null }
-}
+Stored as chunks under:
+```
+posts/{postID}/0 TXT "chunk0"
+posts/{postID}/1 TXT "chunk1"
+posts/{postID}/meta TXT "timestamp|sig|next"
 ```
 
-4. Proxy updates DNS records via Cloudflare API.
+Each `chunkX` contains a base64-encoded encrypted blob (max 255 chars per TXT record).
 
 ---
 
-## ⚙️ Serverless Proxy
+### 💬 Comments
 
-A Cloudflare Worker or similar handles authenticated DNS writes:
-
-- Accepts signed payload from app
-- Validates format
-- Calls Cloudflare API to update zone TXT records
-
-Supports:
-
-- Post creation
-- Voting
-- Commenting
-
----
-
-## 🛠️ Roadmap
-
--
-
----
-
-## 📂 Example Zones
-
+Stored under:
 ```
-head.alice.example.com                → "abc123"
-0.abc123.alice.example.com           → "SGVsbG8g..."
-meta.abc123.alice.example.com        → "ts|null|hash"
-vote0.abc123.alice.example.com       → "bob_pubkey|+1|sig"
-comment0.abc123.alice.example.com    → "comment blob"
+comments/{postID}-{commentID}/0 TXT "chunk0"
+comments/{postID}-{commentID}/meta TXT "timestamp|sig|next"
 ```
 
 ---
 
-## 📖 License
+### 👍 Votes
 
-MIT or permissive open source license. Build your own clones or clients.
-
----
-
-## 🙋 Want Help?
-
-This is an early-stage protocol — feel free to fork it, build your own zone, or expand on the format. Contributions, client apps, and write proxies welcome.
+Stored under:
+```
+votes/{postID}-{voter} TXT "+1|voter_pubkey|sig"
+```
 
 ---
 
+### 👤 Profile
+
+```
+profile/_profile TXT "pubkey=...|displayName=..."
+```
