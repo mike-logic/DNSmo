@@ -1,8 +1,25 @@
 # DNSmo Worker
 
-This is a [DNSmo](https://github.com/dnsmo) compatible Cloudflare Worker that acts as a federation endpoint and resolver.
+This project implements a [DNSmo](https://github.com/dnsmo) federation-compatible endpoint using Cloudflare Workers.
 
-It accepts signed JSON posts via `/publish`, stores them (currently in memory), and serves them at `/resolve/{zone}`. It also exposes a discovery file at `/federation.json`.
+DNSmo is a decentralized publishing system that uses DNS-like zones as personal namespaces. Users publish posts as `TXT`-style key-value records inside their zones, which are served over DNS, HTTP, or federation APIs. Each zone acts as a self-contained feed.
+
+This Worker enables users to:
+
+- ✅ Publish signed posts to a DNS-style zone (e.g. `post000` to `post999`)
+- ✅ Chain zone pages using `_next`
+- ✅ Serve the content of any zone via HTTP (`/resolve`)
+- ✅ Discover federation capabilities via `/federation.json`
+
+---
+
+## 🧠 How DNSmo Works
+
+- Users have a zone (e.g. `yourname.example.com`)
+- Posts are stored as keys like `post000`, `post001`, etc.
+- Posts are signed with an Ed25519 key and submitted to a federation endpoint
+- Federation endpoints (like this Worker) store the posts and serve them via `/resolve/{zone}`
+- The `/federation.json` endpoint tells clients how to publish
 
 ---
 
@@ -76,12 +93,12 @@ Returns:
 
 ---
 
-## 🧠 What the Worker does
+## 🧠 What the Worker Does
 
-- Serves `/federation.json` with federation metadata
-- Accepts signed posts via `POST /publish`
-- Stores posts in memory (not persistent)
-- Serves `GET /resolve/{zone}` with current records
+- Serves `/federation.json` to advertise federation support
+- Accepts signed JSON payloads via `POST /publish`
+- Stores posts in memory (can be upgraded to Cloudflare KV)
+- Responds to `GET /resolve/{zone}` with current records
 
 ---
 
@@ -89,7 +106,7 @@ Returns:
 
 ### Edit `index.js`:
 
-Update the `whitelist` domains allowed to publish:
+Update the allowed domains for publishing:
 
 ```js
 whitelist: ["yourdomain.com"]
@@ -123,9 +140,29 @@ wrangler deploy --env production
 
 After deployment:
 
-- `/federation.json` should reflect your whitelist
-- `/publish` should accept signed posts
-- `/resolve/{zone}` will return stored post data
+- `GET /federation.json` shows federation support
+- `POST /publish` accepts signed posts
+- `GET /resolve/yourzone.example.com` returns records
+
+---
+
+## 🔐 Federation Signing Spec
+
+Each post must include:
+
+```json
+{
+  "zone": "yourname.example.com",
+  "records": {
+    "post000": "hello world | ts=1234567890"
+  },
+  "timestamp": 1234567890,
+  "publicKey": "<base64-ed25519-pubkey>",
+  "signature": "<base64-ed25519-sig>"
+}
+```
+
+The signature is calculated over the canonical JSON of `{ zone, records, timestamp }` with sorted keys and no extra whitespace.
 
 ---
 
