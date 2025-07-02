@@ -1,8 +1,8 @@
-# DNSmo Worker (api.usingthe.cloud)
+# DNSmo Worker
 
-This is a [DNSmo](https://github.com/dnsmo) compatible federation + resolver worker for decentralized post publishing over DNS-style zones.
+This is a [DNSmo](https://github.com/dnsmo) compatible Cloudflare Worker that acts as a federation endpoint and resolver.
 
-It accepts signed JSON posts via `/publish`, stores them (currently in memory), and serves them at `/resolve/{zone}`.
+It accepts signed JSON posts via `/publish`, stores them (currently in memory), and serves them at `/resolve/{zone}`. It also exposes a discovery file at `/federation.json`.
 
 ---
 
@@ -11,7 +11,7 @@ It accepts signed JSON posts via `/publish`, stores them (currently in memory), 
 ```
 dnsmo-worker/
 ├── index.js          # Cloudflare Worker logic (handles federation + publishing)
-├── wrangler.toml     # Deployment config
+├── wrangler.toml     # Deployment config (you must customize this)
 ├── generate_keys.py  # Generates Ed25519 keypair for signing posts
 ├── publish_post.py   # Sends a signed post to the federation API
 ```
@@ -20,7 +20,7 @@ dnsmo-worker/
 
 ## 🚀 Quickstart
 
-### 1. Install requirements
+### 1. Install Python requirements
 
 ```bash
 pip install pynacl requests
@@ -34,44 +34,37 @@ pip install pynacl requests
 python generate_keys.py
 ```
 
-This will output:
+This outputs:
 
-- A base64 private key (save it!)
-- A base64 public key (used in publishing requests)
+- A base64 private key (used for signing posts)
+- A base64 public key (sent in each post)
 
 ---
 
-### 3. Send a signed post
+### 3. Customize `publish_post.py`
 
-Update `publish_post.py` with your private key:
+Edit:
 
 ```python
 PRIVATE_KEY_B64 = "..."
-ZONE = "yourname.usingthe.cloud"
+ZONE = "yourzone.example.com"
 ```
 
-Then run:
+Then publish:
 
 ```bash
 python publish_post.py
 ```
 
-You should get:
-
-```
-Status: 200
-Response: {"ok":true}
-```
-
 ---
 
-### 4. View your posts
+### 4. View your post
 
 ```bash
-curl https://api.usingthe.cloud/resolve/yourname.usingthe.cloud
+curl https://your-api-domain.com/resolve/yourzone.example.com
 ```
 
-You’ll get back:
+Returns:
 
 ```json
 {
@@ -83,48 +76,56 @@ You’ll get back:
 
 ---
 
-## 🧠 How it works
+## 🧠 What the Worker does
 
-- `index.js` runs on Cloudflare Workers
-- Accepts signed federation posts via `POST /publish`
-- Temporarily stores records in memory (use KV for persistence)
+- Serves `/federation.json` with federation metadata
+- Accepts signed posts via `POST /publish`
+- Stores posts in memory (not persistent)
 - Serves `GET /resolve/{zone}` with current records
-- Federation config lives at `/federation.json`
 
 ---
 
-## 🔧 Customization Guide
+## 🛠 Customize Before Deploying
 
-If you're cloning this for your own domain (e.g. `api.mydomain.com`), make sure you:
+### Edit `index.js`:
 
-1. Update the `whitelist` in `index.js`:
+Update the `whitelist` domains allowed to publish:
 
 ```js
 whitelist: ["yourdomain.com"]
 ```
 
-2. Set your route in `wrangler.toml`:
+---
+
+### Edit `wrangler.toml`:
+
+Replace the placeholder values:
 
 ```toml
+name = "dnsmo-worker"
+main = "index.js"
+compatibility_date = "2024-07-01"
+account_id = "YOUR_CLOUDFLARE_ACCOUNT_ID"
+workers_dev = true
+
 [env.production]
-zone_id = "your-cloudflare-zone-id"
+zone_id = "YOUR_CLOUDFLARE_ZONE_ID"
 route = "api.yourdomain.com/*"
 ```
 
-3. Deploy with:
+---
+
+### Deploy the Worker
 
 ```bash
 wrangler deploy --env production
 ```
 
----
+After deployment:
 
-## 🧱 Coming soon
-
-- 🔁 Auto-increment post keys (`post000`, `post001`, etc.)
-- 🪣 Replace in-memory store with Cloudflare KV or R2
-- 🔏 Add Ed25519 signature verification on `/resolve`
-- 🌐 Add web-based composer for signed publishing
+- `/federation.json` should reflect your whitelist
+- `/publish` should accept signed posts
+- `/resolve/{zone}` will return stored post data
 
 ---
 
