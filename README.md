@@ -1,99 +1,133 @@
+# DNSmo Worker (api.usingthe.cloud)
 
-# 🌐 DNSmo — Decentralized, Encrypted Microblogging over DNS
+This is a [DNSmo](https://github.com/dnsmo) compatible federation + resolver worker for decentralized post publishing over DNS-style zones.
 
-DNSmo is a minimal, infrastructure-free microblogging system that stores encrypted posts, comments, votes, and profile data entirely in **DNS TXT records** under user-owned zones.
-
-Built for **true decentralization**, DNSmo enables fully portable user identities, cryptographic ownership of content, and a feed constructed entirely from public DNS queries — no centralized servers or social networks.
-
----
-
-## 🧠 Core Philosophy
-
-- 📡 **Read = DNS only** — Content is read directly from the DNS using your system resolver or DoH.
-- ✍️ **Write = Serverless proxy** — Writing goes through a small API (e.g., Cloudflare Worker) that updates DNS records.
-- 🔐 **Encrypted to outsiders** — Only DNSmo-aware clients can decrypt and verify data.
-- 👤 **User-owned zones** — Every user owns their domain (e.g., `alice.dnsmo.zone`) and all content beneath it.
-- 📦 **Portable & forkable** — Users can export all their DNS content and spin up their own ecosystem.
+It accepts signed JSON posts via `/publish`, stores them (currently in memory), and serves them at `/resolve/{zone}`.
 
 ---
 
-## 📦 Directory Layout (Hierarchical DNS Zone)
-
-Example: `alice.dnsmo.zone`
+## 📦 Contents
 
 ```
-alice.dnsmo.zone
-├── profile/
-│   └── _profile TXT "pubkey=...|displayName=Alice"
-├── posts/
-│   ├── 20250701-abc123/
-│   │   ├── 0 TXT "chunk0"
-│   │   ├── 1 TXT "chunk1"
-│   │   └── meta TXT "timestamp|sig|next"
-├── comments/
-│   ├── abc123-comment1/
-│   │   ├── 0 TXT "chunk0"
-│   │   └── meta TXT "timestamp|sig|next"
-├── votes/
-│   └── abc123-bob TXT "+1|bob_pubkey|sig"
-└── head TXT "20250701-abc123"  # most recent post
-```
-
-All data is chunked and signed. Chronology is established through timestamps and `next` pointers.
-
----
-
-## 🔐 Security Model
-
-| Function   | Method                                      |
-|------------|---------------------------------------------|
-| Encryption | NaCl Sealed Box (X25519 + XSalsa20)         |
-| Signing    | Ed25519                                     |
-| Auth       | DNS updates via API key (scoped to writes)  |
-| Visibility | Opaque outside DNSmo app, decrypted inside  |
-
-- Posts, comments, votes: Encrypted and signed.
-- Readers verify signatures against `_profile` public key.
-- Posts are only visible to DNSmo-aware apps.
-
----
-
-## 📇 DNS Record Types
-
-### 📝 Posts
-
-Stored as chunks under:
-```
-posts/{postID}/0 TXT "chunk0"
-posts/{postID}/1 TXT "chunk1"
-posts/{postID}/meta TXT "timestamp|sig|next"
-```
-
-Each `chunkX` contains a base64-encoded encrypted blob (max 255 chars per TXT record).
-
----
-
-### 💬 Comments
-
-Stored under:
-```
-comments/{postID}-{commentID}/0 TXT "chunk0"
-comments/{postID}-{commentID}/meta TXT "timestamp|sig|next"
+dnsmo-worker/
+├── index.js          # Cloudflare Worker logic (handles federation + publishing)
+├── wrangler.toml     # Deployment config
+├── generate_keys.py  # Generates Ed25519 keypair for signing posts
+├── publish_post.py   # Sends a signed post to the federation API
 ```
 
 ---
 
-### 👍 Votes
+## 🚀 Quickstart
 
-Stored under:
-```
-votes/{postID}-{voter} TXT "+1|voter_pubkey|sig"
+### 1. Install requirements
+
+```bash
+pip install pynacl requests
 ```
 
 ---
 
-### 👤 Profile
+### 2. Generate your Ed25519 keypair
+
+```bash
+python generate_keys.py
+```
+
+This will output:
+
+- A base64 private key (save it!)
+- A base64 public key (used in publishing requests)
+
+---
+
+### 3. Send a signed post
+
+Update `publish_post.py` with your private key:
+
+```python
+PRIVATE_KEY_B64 = "..."
+ZONE = "yourname.usingthe.cloud"
+```
+
+Then run:
+
+```bash
+python publish_post.py
+```
+
+You should get:
 
 ```
-profile/_profile TXT "pubkey=...|displayName=..."
+Status: 200
+Response: {"ok":true}
 ```
+
+---
+
+### 4. View your posts
+
+```bash
+curl https://api.usingthe.cloud/resolve/yourname.usingthe.cloud
+```
+
+You’ll get back:
+
+```json
+{
+  "records": {
+    "post000": "hello world | ts=..."
+  }
+}
+```
+
+---
+
+## 🧠 How it works
+
+- `index.js` runs on Cloudflare Workers
+- Accepts signed federation posts via `POST /publish`
+- Temporarily stores records in memory (use KV for persistence)
+- Serves `GET /resolve/{zone}` with current records
+- Federation config lives at `/federation.json`
+
+---
+
+## 🔧 Customization Guide
+
+If you're cloning this for your own domain (e.g. `api.mydomain.com`), make sure you:
+
+1. Update the `whitelist` in `index.js`:
+
+```js
+whitelist: ["yourdomain.com"]
+```
+
+2. Set your route in `wrangler.toml`:
+
+```toml
+[env.production]
+zone_id = "your-cloudflare-zone-id"
+route = "api.yourdomain.com/*"
+```
+
+3. Deploy with:
+
+```bash
+wrangler deploy --env production
+```
+
+---
+
+## 🧱 Coming soon
+
+- 🔁 Auto-increment post keys (`post000`, `post001`, etc.)
+- 🪣 Replace in-memory store with Cloudflare KV or R2
+- 🔏 Add Ed25519 signature verification on `/resolve`
+- 🌐 Add web-based composer for signed publishing
+
+---
+
+## 📄 License
+
+MIT

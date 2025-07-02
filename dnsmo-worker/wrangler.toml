@@ -1,0 +1,10 @@
+
+name = "dnsmo-worker"
+main = "index.js"
+compatibility_date = "2024-07-01"
+account_id = "<Cloudflare Account ID>"
+workers_dev = true
+
+[env.production]
+zone_id = "<Cloudflare Zone ID>"
+route = "<Domain>/*"
