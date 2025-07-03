@@ -1,25 +1,21 @@
 # DNSmo Worker
 
-This project implements a [DNSmo](https://github.com/dnsmo) federation-compatible endpoint using Cloudflare Workers.
+This project implements a [DNSmo](https://github.com/dnsmo) federation-compatible endpoint using **Cloudflare Workers**, with optional Ed25519 signing and hierarchical comments.
 
-DNSmo is a decentralized publishing system that uses DNS-like zones as personal namespaces. Users publish posts as `TXT`-style key-value records inside their zones, which are served over DNS, HTTP, or federation APIs. Each zone acts as a self-contained feed.
-
-This Worker enables users to:
-
-- ✅ Publish signed posts to a DNS-style zone (e.g. `post000` to `post999`)
-- ✅ Chain zone pages using `_next`
-- ✅ Serve the content of any zone via HTTP (`/resolve`)
-- ✅ Discover federation capabilities via `/federation.json`
+DNSmo is a decentralized publishing system that uses DNS-style zones as personal namespaces. Each user publishes signed posts into their zone, served via HTTP or federation APIs. This Worker provides an easy gateway to interact with that system.
 
 ---
 
-## 🧠 How DNSmo Works
+## ✅ Features
 
-- Users have a zone (e.g. `yourname.example.com`)
-- Posts are stored as keys like `post000`, `post001`, etc.
-- Posts are signed with an Ed25519 key and submitted to a federation endpoint
-- Federation endpoints (like this Worker) store the posts and serve them via `/resolve/{zone}`
-- The `/federation.json` endpoint tells clients how to publish
+- **Post creation** (`post000`, `post001`, ...)
+- **Signed publishing** with Ed25519 keys
+- **Threaded-style comments** via hierarchical zone names
+- **Reply chaining** (e.g. reply to post, or to a comment)
+- **Comment count API**
+- **Federation discovery** at `/federation.json`
+- **Record resolution** via `/resolve/{zone}`
+- **Flat zone design** backed by Cloudflare KV
 
 ---
 
@@ -27,17 +23,28 @@ This Worker enables users to:
 
 ```
 dnsmo-worker/
-├── index.js          # Cloudflare Worker logic (handles federation + publishing)
-├── wrangler.toml     # Deployment config (you must customize this)
-├── generate_keys.py  # Generates Ed25519 keypair for signing posts
-├── publish_post.py   # Sends a signed post to the federation API
+├── index.js           # Cloudflare Worker logic (handles publishing + federation)
+├── wrangler.toml      # Worker deployment config (you must customize this)
+├── dnsmo_cli.py       # Interactive command-line client
+├── generate_keys.py   # Ed25519 keypair generator
 ```
+
+---
+
+## 🧠 How DNSmo Works
+
+- A *zone* is your namespace (e.g. `alice.example.com`)
+- Posts are stored as `TXT`-style key-value records (`post000`, `post001`, ...)
+- Comments are stored as nested zones (`comment000.post000.alice.example.com`)
+- All messages are **signed with an Ed25519 keypair**
+- Federation endpoints **validate and serve content** using `/resolve`
+- The CLI tool helps you post, comment, and fetch data interactively
 
 ---
 
 ## 🚀 Quickstart
 
-### 1. Install Python requirements
+### 1. Install dependencies
 
 ```bash
 pip install pynacl requests
@@ -45,127 +52,246 @@ pip install pynacl requests
 
 ---
 
-### 2. Generate your Ed25519 keypair
+### 2. Generate your signing key
 
 ```bash
 python generate_keys.py
 ```
 
-This outputs:
-
-- A base64 private key (used for signing posts)
-- A base64 public key (sent in each post)
+This creates a `~/.dnsmo.key` file and shows your public key.
 
 ---
 
-### 3. Customize `publish_post.py`
-
-Edit:
-
-```python
-PRIVATE_KEY_B64 = "..."
-ZONE = "yourzone.example.com"
-```
-
-Then publish:
+### 3. Run the CLI client
 
 ```bash
-python publish_post.py
+python dnsmo_cli.py
+```
+
+You'll see:
+
+```text
+📡 Welcome to DNSmo CLI. Type help or ? to list commands.
+dnsmo>
 ```
 
 ---
 
-### 4. View your post
+### 4. Post something
 
-```bash
-curl https://your-api-domain.com/resolve/yourzone.example.com
+```text
+dnsmo> post hello from DNSmo | ts=1751500000
 ```
 
-Returns:
+Creates `post000.yourdomain.com` (or `post001`, etc).
 
-```json
-{
-  "records": {
-    "post000": "hello world | ts=..."
+---
+
+### 5. Comment on a post
+
+```text
+dnsmo> comment yourdomain.com post000 this is a comment | ts=1751500050
+```
+
+Creates `comment000.post000.yourdomain.com`
+
+---
+
+### 6. Reply to a comment
+
+```text
+dnsmo> comment yourdomain.com comment000.post000 this is a reply
+```
+
+Creates `comment000.comment000.post000.yourdomain.com`
+
+---
+
+### 7. View all comments
+
+```text
+dnsmo> comments yourdomain.com post000
+```
+
+Returns a flattened tree of replies to that post or comment.
+
+---
+
+## 💬 CLI Commands
+
+| Command | Description |
+|--------|-------------|
+| `post <text> | ts=<timestamp>` | Create a new post in your zone |
+| `comment <zone> <parentID> <text> | ts=<timestamp>` | Comment on a post or comment |
+| `comments <zone> <postID>` | View all comments for a post (recursive) |
+| `exit` | Exit the CLI |
+
+### Example
+
+```bash
+dnsmo> post my first post | ts=1751550000
+dnsmo> comment yourzone.com post000 hello!
+dnsmo> comment yourzone.com comment000.post000 replying to your comment!
+dnsmo> comments yourzone.com post000
+```
+
+---
+
+## 🧠 Worker Logic
+
+- `GET /federation.json` returns federation policy:
+  ```json
+  {
+    "allow": true,
+    "pingback": "https://api.example.com/publish",
+    "whitelist": ["example.com"]
   }
-}
-```
+  ```
+
+- `POST /publish` accepts signed posts:
+  ```json
+  {
+    "zone": "post000.example.com",
+    "records": { "TXT": "hello world" },
+    "timestamp": 1234567890,
+    "publicKey": "...",
+    "signature": "..."
+  }
+  ```
+
+- `GET /resolve/{zone}` returns:
+  ```json
+  {
+    "records": {
+      "post000": "hello world"
+    },
+    "timestamp": 1234567890,
+    "publicKey": "...",
+    "signature": "..."
+  }
+  ```
+
+- `GET /comment/{zone}/{postID}` returns a flat list of comments (including replies)
+
+- `GET /comment/{zone}/{postID}?count=true` returns:
+  ```json
+  { "count": 3 }
+  ```
 
 ---
 
-## 🧠 What the Worker Does
+## 🛠 Configuration
 
-- Serves `/federation.json` to advertise federation support
-- Accepts signed JSON payloads via `POST /publish`
-- Stores posts in memory (can be upgraded to Cloudflare KV)
-- Responds to `GET /resolve/{zone}` with current records
-
----
-
-## 🛠 Customize Before Deploying
-
-### Edit `index.js`:
-
-Update the allowed domains for publishing:
+### ✅ Edit `index.js`
 
 ```js
-whitelist: ["yourdomain.com"]
+const CONFIG = {
+  federation: {
+    allow: true,
+    pingback: 'https://api.example.com/publish',
+    whitelist: ['yourzone.com']
+  },
+  kvPrefix: 'dnsmo:',
+};
 ```
 
 ---
 
-### Edit `wrangler.toml`:
-
-Replace the placeholder values:
+### ✅ Edit `wrangler.toml`
 
 ```toml
 name = "dnsmo-worker"
 main = "index.js"
 compatibility_date = "2024-07-01"
-account_id = "YOUR_CLOUDFLARE_ACCOUNT_ID"
-workers_dev = true
+
+[[kv_namespaces]]
+binding = "DNSMO"
+id = "your-kv-id"
+preview_id = "your-preview-id"
 
 [env.production]
-zone_id = "YOUR_CLOUDFLARE_ZONE_ID"
 route = "api.yourdomain.com/*"
+zone_id = "your-zone-id"
+```
+
+Get your KV ID with:
+
+```bash
+wrangler kv:namespace create DNSMO
 ```
 
 ---
 
-### Deploy the Worker
+### ✅ Deploy the Worker
 
 ```bash
 wrangler deploy --env production
 ```
 
-After deployment:
-
-- `GET /federation.json` shows federation support
-- `POST /publish` accepts signed posts
-- `GET /resolve/yourzone.example.com` returns records
-
 ---
 
-## 🔐 Federation Signing Spec
+## 🔐 Signature Spec
 
-Each post must include:
+Each published message must include:
 
 ```json
 {
   "zone": "yourname.example.com",
   "records": {
-    "post000": "hello world | ts=1234567890"
+    "post000": "hello world"
   },
   "timestamp": 1234567890,
   "publicKey": "<base64-ed25519-pubkey>",
-  "signature": "<base64-ed25519-sig>"
+  "signature": "<base64-ed25519-signature>"
 }
 ```
 
-The signature is calculated over the canonical JSON of `{ zone, records, timestamp }` with sorted keys and no extra whitespace.
+Signature is created over this canonical JSON:
+
+```json
+{ "records": ..., "timestamp": ..., "zone": ... }
+```
+
+Sorted keys, UTF-8, no whitespace.
+
+---
+
+## 🔁 Comments & Replies
+
+- All comments are just nested posts using DNS-style naming
+- You can reply to a post or to another comment
+- Structure is always: `comment###.parentID.zone`
+- Replies are recursively returned via the `/comment` API
+
+---
+
+## 🚫 Deletion
+
+- Posts and comments are **immutable**
+- A deleted comment may be replaced with:
+  ```
+  This comment has been deleted.
+  ```
+  (future implementation)
+
+---
+
+## 🧪 Planned Features
+
+- Optional moderation/permissions via signature origin
+- Basic moderation logic (admin keys, deletions)
+- Reply nesting indicator (not visual threading)
+- Post pagination / time filtering
 
 ---
 
 ## 📄 License
 
 MIT
+
+---
+
+## 🌐 Project Links
+
+- DNSmo Protocol: [github.com/dnsmo](https://github.com/dnsmo)
+- Cloudflare Workers: [developers.cloudflare.com](https://developers.cloudflare.com/workers/)

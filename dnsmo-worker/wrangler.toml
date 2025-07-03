@@ -1,10 +1,11 @@
-
 name = "dnsmo-worker"
 main = "index.js"
-compatibility_date = "2024-07-01"
-account_id = "<Cloudflare Account ID>"
-workers_dev = true
+compatibility_date = "2024-01-01"
 
-[env.production]
-zone_id = "<Cloudflare Zone ID>"
-route = "<Domain>/*"
+[vars]
+# Optional: you can pass static configuration here
+
+[[kv_namespaces]]
+binding = "DNSMO"
+id = "your-kv-id-here"
+preview_id = "your-kv-preview-id"
