@@ -1,11 +1,15 @@
-name = "dnsmo-worker"
+name = "dnsmo-publish"
 main = "index.js"
-compatibility_date = "2024-01-01"
+compatibility_date = "2024-07-01"
+compatibility_flags = ["nodejs_compat"]
 
-[vars]
-# Optional: you can pass static configuration here
+account_id = "${CF_ACCOUNT_ID}"
+workers_dev = true
 
-[[kv_namespaces]]
-binding = "DNSMO"
-id = "your-kv-id-here"
-preview_id = "your-kv-preview-id"
+[env.production]
+zone_id = "${CF_ZONE_ID}"
+route = "https://api.example.com/*"
+
+[env.production.vars]
+CF_ZONE_ID = "${CF_ZONE_ID}"
+CF_API_TOKEN = "${CF_API_TOKEN}"
