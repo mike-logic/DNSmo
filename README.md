@@ -1,135 +1,139 @@
-# DNSmo Worker
 
-DNSmo is a decentralized microblogging protocol that stores signed posts and comments directly in **DNS TXT records** under hierarchical zones. This project implements a **pure Cloudflare Worker** backend that handles DNS record creation, federation, and feed generation — with no backend database or infrastructure.
+# DNSmo — Decentralized DNS-based Microblogging
 
-> 🧠 Your DNS zone *is* your social feed.
+DNSmo is a protocol and reference implementation that stores social content—posts, comments, likes—directly in DNS. This repository includes:
 
----
-
-## ✅ Features
-
-- 🔑 **Signed posts and comments** using Ed25519
-- 🧵 **Hierarchical replies** via nested subdomains
-- 📡 **Global timeline** by crawling user-level DNS zones
-- 💬 **Comments & likes** encoded as additional DNS records
-- 📁 **No KV, no database** – everything lives in DNS
+- A Cloudflare Worker backend (`index.js`)
+- A local command-line client (`dnsmo_cli.py`)
+- A federation model for decentralized discovery
+- No backend database required — just DNS
 
 ---
 
-## 🛠 Project Structure
+## 🌐 What it does
 
-```
-dnsmo-worker/
-├── index.js         # Cloudflare Worker (100% stateless DNS interface)
-├── dnsmo_cli.py     # Reference CLI client (optional)
-├── wrangler.toml    # Deployment config (edit for your zone)
-```
-
-Deprecated:
-- ❌ `generate_keys.py` – removed (CLI handles key generation)
-- ❌ `publish_post.py` – removed (use CLI or HTTP)
+- Stores posts, comments, and likes as signed DNS TXT records
+- Splits and chunks records automatically if they exceed TXT size
+- Publishes public keys as DNS TXT records (`pubkey.<zone>`)
+- Supports signed comments and likes with voter identity
+- Serves global and per-user timelines
+- Provides an extensible federation model
 
 ---
 
-## 🌍 How It Works
+## 🛰️ Federation
 
-### 🧱 Zones as Identity
+The federation system allows decentralized, interlinked social zones.
 
-- Each user owns a zone: `alice.users.example.com`
-- Posts are created as `post123.alice.users.example.com`
-- Comments are `comment001.post123.alice.users.example.com`
-
-### 🔏 Signed Publishing
-
-All posts/comments include:
 ```json
+GET /.well-known/federation.json
+
 {
-  "zone": "alice.users.example.com",
-  "records": { "post123": "hello" },
-  "timestamp": 1751910000,
-  "publicKey": "<base64-ed25519-pubkey>",
-  "signature": "<base64-ed25519-signature>"
+  "allow": true,
+  "pingback": "https://api.example.com/publish",
+  "whitelist": ["example.com", "dnsmo.link"],
+  "registryZone": "users.example.com"
 }
 ```
 
-Signature is over this canonical JSON:
-```json
-{ "records": ..., "timestamp": ..., "zone": ... }
+Each root domain (like `example.com`) hosts a `users` subzone where individual user zones are indexed. For example:
+
 ```
-Sorted keys, UTF-8, no whitespace.
+alice.users.example.com
+bob.users.example.com
+```
+
+Posts live in `postindex.alice.users.example.com` and use incremental IDs like:
+
+```
+post1750000000000.alice.users.example.com
+```
 
 ---
 
-## 🚀 Quickstart
+## ⚙️ Worker Configuration (wrangler.toml)
 
-### 1. Set your config
-
-Edit `wrangler.toml`:
 ```toml
+name = "dnsmo-worker"
+main = "index.js"
+compatibility_date = "2024-07-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+
 [env.production]
-zone_id = "your-cloudflare-zone-id"
-route = "api.yourdomain.com/*"
+zone_id = "${CF_ZONE_ID}"
+account_id = "${CF_ACCOUNT_ID}"
+route = "https://${YOUR_DOMAIN}/*"
+
+[env.production.vars]
+CF_ZONE_ID = "${CF_ZONE_ID}"
+CF_API_TOKEN = "${CF_API_TOKEN}"
+PINGBACK_URL = "${PINGBACK_URL}"
+WHITELIST_DOMAIN = "${WHITELIST_DOMAIN}"
+USER_REGISTRY_ZONE = "${USER_REGISTRY_ZONE}"
 ```
 
 ---
 
-### 2. Deploy to Cloudflare
+## 📦 API Endpoints
 
-```bash
-wrangler deploy --env production
-```
+| Method | Route                           | Description                     |
+|--------|----------------------------------|---------------------------------|
+| POST   | `/register`                      | Register user zone & pubkey     |
+| POST   | `/post/:zone`                    | Publish a signed post           |
+| POST   | `/comment/:zone/:postId`         | Publish a signed comment        |
+| POST   | `/like/:zone/:itemId`            | Like a post or comment          |
+| GET    | `/timeline`                      | Global feed                     |
+| GET    | `/timeline/:zone`                | Per-user feed                   |
+| GET    | `/federation.json`               | Federation metadata             |
 
 ---
 
-### 3. Run the CLI (optional)
+## 🖥️ CLI (dnsmo_cli.py)
+
+The CLI lets you post, comment, and like from a terminal. All actions are signed with your Ed25519 key.
+
+### 🚀 Quick Start
 
 ```bash
 python dnsmo_cli.py
 ```
 
-Example:
+### 💬 Interactive Commands
 
-```text
-dnsmo> register mike.users.example.com
-dnsmo> post hello from DNS!
-dnsmo> comment post123 nice post!
+```
+dnsmo> register alice.users.example.com
+dnsmo> post Hello DNSmo
+dnsmo> comment post1751234567890 Great post!
+dnsmo> like post1751234567890
 dnsmo> timeline
+dnsmo> keys
+dnsmo> exit
 ```
 
----
+### 🗂️ Key Features
 
-## 🧪 CLI Commands
-
-| Command | Description |
-|---------|-------------|
-| `register <zone>` | Creates a new zone and publishes your pubkey |
-| `post <text>` | Publishes a new signed post |
-| `comment <postID> <text>` | Replies to a post |
-| `like <postID>` | Likes a post or comment |
-| `timeline` | Shows global feed (latest posts by all users) |
-| `timeline <zone>` | Shows all posts by one user |
-| `comments <postID>` | Shows comments under a post |
-| `keys` | Show your public key |
-| `exit` | Exit the CLI |
+- Generates and persists keypair in `dnsmo_key.json`
+- Signs all data before posting
+- Uses DNS to resolve public keys
+- Supports global and per-zone timelines
+- Likes/comments tracked and indexed
 
 ---
 
-## 🧠 Federation Design
+## 🧪 Known Limitations
 
-The worker dynamically crawls:
-
-- `users.example.com` → fetch all user zones
-- Each user zone → fetch latest post for global feed
-- Comments and replies → parsed by DNS traversal
-
-No `federation.json` is used — it’s all DNS-based.
+- Comment/like counts may lag in timeline if chunked data exceeds resolver limits
+- DNS caching may delay visibility of new posts
+- Federation discovery assumes well-formed zones and federation.json
+- No encryption — all content is public
 
 ---
 
-## ✨ Planned Endpoints
+## 🛣️ Roadmap
 
-- `GET /timeline` – global feed from all users
-- `GET /timeline/:zone` – per-user feed
-- `POST /register` – publish user zone + pubkey
-- `POST /post/:zone` – publish signed post
-- `POST /comment/:zone/:postID` – comment on a post
+- [ ] End-to-end encryption for private zones
+- [ ] Rich metadata (attachments, geotags)
+- [ ] DNS-less gateway fallback (optional CDN mirror)
+- [ ] Vote verification UX and key rotation
+- [ ] Federation trust scoring or moderation
